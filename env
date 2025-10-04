@@ -1,0 +1,3 @@
+# Set your Google Cloud project ID
+export PROJECT_ID="n8n-personal-473917"
+export REGION="asia-south2" 

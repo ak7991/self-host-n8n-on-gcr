@@ -2,8 +2,8 @@
 # Rename this to terraform.tfvars and fill in the sensitive values.
 
 # --- Optional (Defaults are likely suitable based on your setup) --- #
-# gcp_project_id = "your-project-id"
-# gcp_region     = "us-west2"
+gcp_project_id = "n8n-personal-473917"
+gcp_region     = "asia-south2"
 # db_name        = "n8n"
 # db_user        = "n8n-user"
 # db_tier        = "db-f1-micro"
