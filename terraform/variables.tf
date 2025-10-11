@@ -14,31 +14,32 @@ variable "use_custom_image" {
   type        = bool
   default     = false
 }
-
+# DB creds for n8n's persistence
 variable "db_name" {
   description = "Name for the Cloud SQL database."
   type        = string
-  default     = "n8n"
+  default     = "n8n_db"
 }
 
-variable "db_user" {
-  description = "Username for the Cloud SQL database user."
-  type        = string
-  default     = "n8n-user"
+variable "n8n-db-host" {
+  description = "Host for postgres"
+  type = string
 }
 
-variable "db_tier" {
-  description = "Cloud SQL instance tier."
-  type        = string
-  default     = "db-f1-micro"
+variable "n8n-db-username-secret-id" {
+  description = "GCP secret_id to access the username to the postgres DB"
+  type = string
 }
 
-variable "db_storage_size" {
-  description = "Cloud SQL instance storage size in GB."
-  type        = number
-  default     = 10
+variable "n8n-db-password-secret-id" {
+  description = "GCP secret_id to access the password to the postgres DB"
+  type = string
 }
 
+variable "n8n-encryption-key-secret-id" {
+  description = "GCP secret_id to access n8n's encryption key"
+  type = string
+}
 variable "artifact_repo_name" {
   description = "Name for the Artifact Registry repository (only used if use_custom_image is true)."
   type        = string

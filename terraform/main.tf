@@ -28,11 +28,6 @@ resource "google_project_service" "run" {
   disable_on_destroy = false
 }
 
-resource "google_project_service" "sqladmin" {
-  service            = "sqladmin.googleapis.com"
-  disable_on_destroy = false
-}
-
 resource "google_project_service" "secretmanager" {
   service            = "secretmanager.googleapis.com"
   disable_on_destroy = false
@@ -43,7 +38,8 @@ resource "google_project_service" "cloudresourcemanager" {
   disable_on_destroy = false
 }
 
-# --- Artifact Registry (Optional - only for custom image) --- #
+
+# --- Artifact Registry --- #
 resource "google_artifact_registry_repository" "n8n_repo" {
   count         = var.use_custom_image ? 1 : 0
   project       = var.gcp_project_id
@@ -54,84 +50,21 @@ resource "google_artifact_registry_repository" "n8n_repo" {
   depends_on    = [google_project_service.artifactregistry]
 }
 
-# --- Cloud SQL --- #
-resource "google_sql_database_instance" "n8n_db_instance" {
-  name             = "${var.cloud_run_service_name}-db"
-  project          = var.gcp_project_id
-  region           = var.gcp_region
-  database_version = "POSTGRES_13"
-  settings {
-    tier              = var.db_tier
-    availability_type = "ZONAL"
-    disk_type         = "PD_HDD"
-    disk_size         = var.db_storage_size
-    backup_configuration {
-      enabled = false
-    }
-  }
-  deletion_protection = false
-  depends_on          = [google_project_service.sqladmin]
+
+
+# Actual secrets
+data "google_secret_manager_secret" "n8n-db-username" {
+  secret_id = var.n8n-db-username-secret-id
 }
 
-resource "google_sql_database" "n8n_database" {
-  name     = var.db_name
-  instance = google_sql_database_instance.n8n_db_instance.name
-  project  = var.gcp_project_id
+data "google_secret_manager_secret" "n8n-db-password" {
+  secret_id = var.n8n-db-password-secret-id
 }
 
-resource "google_sql_user" "n8n_user" {
-  name     = var.db_user
-  instance = google_sql_database_instance.n8n_db_instance.name
-  password = random_password.db_password.result
-  project  = var.gcp_project_id
+data "google_secret_manager_secret" "n8n-encryption-key" {
+  secret_id = var.n8n-encryption-key-secret-id
 }
 
-# --- Secret Manager --- #
-resource "random_password" "db_password" {
-  length      = 16
-  special     = true
-  min_upper   = 1
-  min_lower   = 1
-  min_numeric = 1
-  min_special = 1
-  keepers = {
-    db_instance = google_sql_database_instance.n8n_db_instance.name
-    db_user     = var.db_user
-  }
-}
-
-resource "google_secret_manager_secret" "db_password_secret" {
-  secret_id = "${var.cloud_run_service_name}-db-password"
-  project   = var.gcp_project_id
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.secretmanager]
-}
-
-resource "google_secret_manager_secret_version" "db_password_secret_version" {
-  secret      = google_secret_manager_secret.db_password_secret.id
-  secret_data = random_password.db_password.result
-}
-
-resource "random_password" "n8n_encryption_key" {
-  length  = 32
-  special = false
-}
-
-resource "google_secret_manager_secret" "encryption_key_secret" {
-  secret_id = "${var.cloud_run_service_name}-encryption-key"
-  project   = var.gcp_project_id
-  replication {
-    auto {}
-  }
-  depends_on = [google_project_service.secretmanager]
-}
-
-resource "google_secret_manager_secret_version" "encryption_key_secret_version" {
-  secret      = google_secret_manager_secret.encryption_key_secret.id
-  secret_data = random_password.n8n_encryption_key.result
-}
 
 # --- IAM Service Account & Permissions --- #
 resource "google_service_account" "n8n_sa" {
@@ -140,24 +73,25 @@ resource "google_service_account" "n8n_sa" {
   project      = var.gcp_project_id
 }
 
+resource "google_secret_manager_secret_iam_member" "db_username_secret_accessor" {
+  project   = var.gcp_project_id
+  secret_id = data.google_secret_manager_secret.n8n-db-username.secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${google_service_account.n8n_sa.email}"
+}
+
 resource "google_secret_manager_secret_iam_member" "db_password_secret_accessor" {
-  project   = google_secret_manager_secret.db_password_secret.project
-  secret_id = google_secret_manager_secret.db_password_secret.secret_id
+  project   = var.gcp_project_id
+  secret_id = data.google_secret_manager_secret.n8n-db-password.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.n8n_sa.email}"
 }
 
 resource "google_secret_manager_secret_iam_member" "encryption_key_secret_accessor" {
-  project   = google_secret_manager_secret.encryption_key_secret.project
-  secret_id = google_secret_manager_secret.encryption_key_secret.secret_id
+  project   = var.gcp_project_id
+  secret_id = data.google_secret_manager_secret.n8n-encryption-key.secret_id
   role      = "roles/secretmanager.secretAccessor"
   member    = "serviceAccount:${google_service_account.n8n_sa.email}"
-}
-
-resource "google_project_iam_member" "sql_client" {
-  project = var.gcp_project_id
-  role    = "roles/cloudsql.client"
-  member  = "serviceAccount:${google_service_account.n8n_sa.email}"
 }
 
 # --- Cloud Run Service --- #
@@ -186,12 +120,12 @@ resource "google_cloud_run_v2_service" "n8n" {
       max_instance_count = var.cloud_run_max_instances
       min_instance_count = 0
     }
-    volumes {
-      name = "cloudsql"
-      cloud_sql_instance {
-        instances = [google_sql_database_instance.n8n_db_instance.connection_name]
-      }
-    }
+    # volumes {
+    #   name = "prismaDB"
+    #   cloud_sql_instance {
+    #     instances = [google_sql_database_instance.n8n_db_instance.connection_name]
+    #   }
+    # }
     containers {
       image = local.n8n_image
       
@@ -206,10 +140,10 @@ resource "google_cloud_run_v2_service" "n8n" {
       # Set command for official image (Option A)
       command = var.use_custom_image ? null : ["/bin/sh"]
       
-      volume_mounts {
-        name       = "cloudsql"
-        mount_path = "/cloudsql"
-      }
+      # volume_mounts {
+      #   name       = "cloudsql"
+      #   mount_path = "/cloudsql"
+      # }
       ports {
         container_port = var.cloud_run_container_port
       }
@@ -230,7 +164,7 @@ resource "google_cloud_run_v2_service" "n8n" {
           value = "/"
         }
       }
-      
+
       env {
         name  = "N8N_PORT"
         value = local.n8n_port
@@ -249,11 +183,25 @@ resource "google_cloud_run_v2_service" "n8n" {
       }
       env {
         name  = "DB_POSTGRESDB_USER"
-        value = var.db_user
+        value_source {
+          secret_key_ref {
+            secret  = data.google_secret_manager_secret.n8n-db-username.secret_id
+            version = "latest"
+          }
+        }
+      }
+      env {
+        name = "DB_POSTGRESDB_PASSWORD"
+        value_source {
+          secret_key_ref {
+            secret  = data.google_secret_manager_secret.n8n-db-password.secret_id
+            version = "latest"
+          }
+        }
       }
       env {
         name  = "DB_POSTGRESDB_HOST"
-        value = "/cloudsql/${google_sql_database_instance.n8n_db_instance.connection_name}"
+        value = var.n8n-db-host
       }
       env {
         name  = "DB_POSTGRESDB_PORT"
@@ -274,21 +222,12 @@ resource "google_cloud_run_v2_service" "n8n" {
       env {
         name  = "QUEUE_HEALTH_CHECK_ACTIVE"
         value = "true"
-      }
-      env {
-        name = "DB_POSTGRESDB_PASSWORD"
-        value_source {
-          secret_key_ref {
-            secret  = google_secret_manager_secret.db_password_secret.secret_id
-            version = "latest"
-          }
-        }
-      }
+      } 
       env {
         name = "N8N_ENCRYPTION_KEY"
         value_source {
           secret_key_ref {
-            secret  = google_secret_manager_secret.encryption_key_secret.secret_id
+            secret  = data.google_secret_manager_secret.n8n-encryption-key.secret_id
             version = "latest"
           }
         }
@@ -333,7 +272,6 @@ resource "google_cloud_run_v2_service" "n8n" {
 
   depends_on = [
     google_project_service.run,
-    google_project_iam_member.sql_client,
     google_secret_manager_secret_iam_member.db_password_secret_accessor,
     google_secret_manager_secret_iam_member.encryption_key_secret_accessor
   ]
