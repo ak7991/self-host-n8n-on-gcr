@@ -97,11 +97,9 @@ resource "google_secret_manager_secret_iam_member" "encryption_key_secret_access
 # --- Cloud Run Service --- #
 locals {
   # Use official image or custom image based on variable
-  n8n_image = var.use_custom_image ? "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${var.artifact_repo_name}/${var.cloud_run_service_name}:latest" : "docker.n8n.io/n8nio/n8n:latest"
-  
+  n8n_image = var.use_custom_image ? "${var.gcp_region}-docker.pkg.dev/${var.gcp_project_id}/${var.artifact_repo_name}/${var.cloud_run_service_name}:latest" : "docker.io/n8nio/n8n:latest"
   # Port configuration differs between options
-  n8n_port = var.use_custom_image ? "443" : "5678"
-  
+  n8n_port = "5678"
   # User folder differs between options
   n8n_user_folder = var.use_custom_image ? "/home/node" : "/home/node/.n8n"
 }
@@ -172,7 +170,7 @@ resource "google_cloud_run_v2_service" "n8n" {
       }
       env {
         name  = "DB_POSTGRESDB_DATABASE"
-        value = var.db_name
+        value = "n8n_db"
       }
       env {
         name  = "DB_POSTGRESDB_USER"
@@ -194,7 +192,7 @@ resource "google_cloud_run_v2_service" "n8n" {
       }
       env {
         name  = "DB_POSTGRESDB_HOST"
-        value = var.n8n-db-host
+        value = "db.prisma.io"
       }
       env {
         name  = "DB_POSTGRESDB_PORT"
@@ -238,12 +236,24 @@ resource "google_cloud_run_v2_service" "n8n" {
         value = "https://${var.cloud_run_service_name}-${data.google_project.project.number}.${var.gcp_region}.run.app"
       }
       env {
+        name = "DB_POSTGRESDB_SSL_REJECT_UNAUTHORIZED"
+        value = "false"
+      }
+      env {
+        name = "DB_POSTGRESDB_SSL"
+        value = "true"
+      }
+      env {
         name  = "N8N_RUNNERS_ENABLED"
         value = "true"
       }
       env {
         name  = "N8N_PROXY_HOPS"
         value = "1"
+      }
+      env {
+        name = "N8N_LOG_LEVEL"
+        value = "debug"
       }
 
       startup_probe {
@@ -265,7 +275,7 @@ resource "google_cloud_run_v2_service" "n8n" {
 
   depends_on = [
     google_project_service.run,
-    google_secret_manager_secret_iam_member.db_password_secret_accessor,
+    # google_secret_manager_secret_iam_member.db_password_secret_accessor,
     google_secret_manager_secret_iam_member.encryption_key_secret_accessor
   ]
 }
